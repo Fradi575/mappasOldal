@@ -1,0 +1,715 @@
+var DEPARTMENT_ROOT_PATH = "https://mad-hatter.it.unideb.hu/srest/phonebook/";
+var employee_img_src_path = "https://mad-hatter.it.unideb.hu/portal/displayDocument/id/";
+var globalDepartmentList = [];
+var rootOwnerId;
+var getDataState;
+var currentDepartmentId;
+var currentStartRowValue;
+var searchEmployeeFieldPreValue = "";
+var currEmployeeSearchValue = "";
+var allEmployeeDownloaded;
+var employeeSearchInProgress;
+var employeeListItemTableLabels = [];
+
+var firstAutomatedRun = false;
+
+var employeeListDataKeys = ["name",
+    "profilePictureDocumentId",
+    "departmentName",
+    "centralPhoneWithExtension",
+    "privatePhoneWithExtension",
+    "formattedEmail",
+    "address",
+    "addressInBuilding",
+    "faxWithExtension",
+    "website",
+    "description"];
+
+function getDataForDepartmentList(url, callback) {
+    "use strict";
+    var xmlhttp = new XMLHttpRequest();
+
+    xmlhttp.onreadystatechange = function () {
+
+        if (xmlhttp.readyState === 4 && xmlhttp.status === 200) {
+            var response = JSON.parse(xmlhttp.responseText);
+
+            if (response.status === "OK") {
+                callback(response, true);
+            } else {
+                callback("", false);
+            }
+        }
+    };
+    xmlhttp.timeout = 30000;
+    xmlhttp.open("GET", url, true);
+    //    xmlhttp.setRequestHeader("Connection", "Keep-Alive");
+    xmlhttp.send();
+
+    xmlhttp.ontimeout = function (e) {
+        callback("", false);
+    };
+}
+
+function setHeightDepartmentListContainer() {
+    "use strict";
+    var container = document.getElementById("departmentListContainer");
+    container.style.height = (document.getElementById("rootDepartmentListItem").offsetHeight + 40) + "px";
+}
+
+function removeSubDepartmentList(departmentId) {
+    "use strict";
+
+    var listItem = document.getElementById("departmentListItem_" + departmentId),
+        container = document.getElementById("departmentListContainer");
+    if (listItem.hasChildNodes()) {
+        listItem.removeChild(listItem.getElementsByTagName("ul")[0]);
+        if (listItem.getElementsByClassName("expand-button").length > 0) {
+            listItem.getElementsByClassName("expand-button")[0].innerHTML = "►";
+        }
+    }
+    setHeightDepartmentListContainer();
+}
+
+function printSubDepartmentList(departmentId) {
+    "use strict";
+    var docElement = document.getElementById("departmentListItem_" + departmentId),
+        subDepartmentList = globalDepartmentList[departmentId].data,
+        i,
+        ul,
+        li,
+        p,
+        expandButton,
+        clickHandler = function (departmentId, clickParam) {
+            return function () {
+                if (clickParam === "click") {
+                    clickDepartmentListItem(departmentId);
+                } else if (clickParam === "expand") {
+                    clickDepartmentListItemExpandButton(departmentId);
+                }
+            };
+        };
+
+    ul = document.createElement("ul");
+    docElement.appendChild(ul);
+
+    if (subDepartmentList.length > 0) {
+
+        for (i = 0; i < subDepartmentList.length; i += 1) {
+
+            li = document.createElement("li");
+            li.setAttribute("id", "departmentListItem_" + subDepartmentList[i].id);
+            li.classList.add("department-list-item");
+
+            p = document.createElement("p");
+            p.innerHTML = subDepartmentList[i].name;
+            p.classList.add("title");
+            p.onclick = clickHandler(subDepartmentList[i].id, "click");
+
+            expandButton = document.createElement("button");
+            expandButton.classList.add("expand-button");
+
+            /*if (globalDepartmentList[subDepartmentList[i].id].data !== null && globalDepartmentList[subDepartmentList[i].id].data.length === 0) {
+             expandButton.innerHTML = "";
+             expandButton.classList.add("disabled");*/
+            if (subDepartmentList[i].leafExists) {
+                expandButton.onclick = clickHandler(subDepartmentList[i].id, "expand");
+                expandButton.innerHTML = "►";
+            } else {
+                expandButton.innerHTML = "";
+                expandButton.classList.add("disabled");
+            }
+
+            li.appendChild(expandButton);
+
+            li.appendChild(p);
+            ul.appendChild(li);
+
+            if (i == 0 && i == (subDepartmentList.length - 1)) {
+                clickDepartmentListItem(departmentId);
+
+                var url = DEPARTMENT_ROOT_PATH + "searchDepartmentEmployee?startRow=" + currentStartRowValue + "&endRow=" + (currentStartRowValue + 14);
+                url += "&departmentId=" + subDepartmentList[i].id;
+
+                getDataForDepartmentList(url, function (response, success) {
+                    if (success) {
+                        if (response.data.length === 0 && currentStartRowValue === 0) {
+                            //                            console.log('üres');
+                            firstAutomatedRun = true;
+                            clickDepartmentListItem(departmentId);
+                            firstAutomatedRun = false;
+                        }
+                    } else {
+                        showErrorMessageLabel(true);
+                    }
+
+                });
+            }
+        }
+    }
+
+    if (subDepartmentList.length === 0) {
+        docElement.getElementsByClassName("expand-button")[0].innerHTML = "";
+        docElement.getElementsByClassName("expand-button")[0].classList.add("disabled");
+        docElement.getElementsByClassName("expand-button")[0].onclick = null;
+        clickDepartmentListItem(departmentId);
+    } else {
+        docElement.getElementsByClassName("expand-button")[0].innerHTML = "▼";
+    }
+
+    setHeightDepartmentListContainer();
+}
+
+function getSubDepartmentList(departmentId, callback) {
+    "use strict";
+    var url = DEPARTMENT_ROOT_PATH + "departmentList?ownerId=" + globalDepartmentList[departmentId].departmentId;
+
+    if (globalDepartmentList[departmentId].data !== null) {
+        currentDepartmentId = departmentId;
+        callback(departmentId);
+    } else if (getDataState === "IDLE") {
+        currentDepartmentId = departmentId;
+        getDataState = "PROCESSING";
+
+        showErrorMessageLabel(false);
+        getDataForDepartmentList(url, function (response, success) {
+            if (success) {
+                globalDepartmentList[currentDepartmentId].data = response.data;
+                var i;
+                for (i = 0; i < response.data.length; i += 1) {
+                    globalDepartmentList[response.data[i].id] = {
+                        ownerId: response.data[i].ownerId,
+                        name: response.data[i].name,
+                        departmentId: response.data[i].id,
+                        data: null
+                    };
+                }
+                callback(currentDepartmentId);
+                getDataState = "IDLE";
+            } else {
+                showErrorMessageLabel(true);
+            }
+        });
+    }
+}
+
+function printEmployeeListItem(itemData) {
+    "use strict";
+    var i,
+        j,
+        itemHelper = document.createElement("div"),
+        header,
+        keyHelper,
+        dataHelper,
+        websiteKeys = [["website", "Website"], ["profileUrl", "Dolgozói profil"], ["tudosterUrl", "Tudóstér profil"]],
+        p,
+        table = document.createElement("table"),
+        tr,
+        td;
+
+    itemHelper.classList.add("employee-list-item");
+
+    for (i = 0; i < employeeListDataKeys.length; i += 1) {
+        dataHelper = itemData[employeeListDataKeys[i]];
+        if (dataHelper !== null && dataHelper !== "" || (itemData[employeeListDataKeys[i]] === "website")) {
+
+            if (i === 0) {
+                header = document.createElement("div");
+                header.classList.add("employee-list-item-header");
+                p = document.createElement("p");
+                p.classList.add("employee-title");
+                p.innerHTML += '<b>' + dataHelper + '</b>';
+
+                if (itemData["jobPosition"]) {
+                    p.innerHTML += ' ' + itemData["jobPosition"];
+                }
+                if (itemData["jobPosition2"]) {
+                    p.innerHTML += ' (' + itemData["jobPosition2"] + ')';
+                }
+
+                if (typeof showEployeeListItemUrl === "function") {
+
+                    showEployeeListItemUrl(p, itemData['userId']);
+                }
+
+                header.appendChild(p);
+
+                itemHelper.appendChild(header);
+            } else if (i === 1) {
+                itemHelper.innerHTML += '<div class="employee-img-and-data-holder"><div class="employee-profile-picture-holder"><img class="employee-profile-picture" src="' + employee_img_src_path + dataHelper + '?width=184"></img></div></div>';
+                //                itemHelper.innerHTML += '<div class="employee-img-and-data-holder"><div class="employee-profile-picture-holder"><img class="employee-profile-picture" onclick="onclickProfilePicture(this) "src="http://mad-hatter.it.unideb.hu/portal/displayDocument/id/' + dataHelper + '?width=184"></img></div></div>';
+            } else if (i === (employeeListDataKeys.length - 1)) {
+                itemHelper.innerHTML += '<div class="employee-info">' + dataHelper + '</div>';
+            } else {
+                if (itemHelper.getElementsByTagName("table").length === 0) {
+                    itemHelper.getElementsByClassName("employee-img-and-data-holder")[0].appendChild(table);
+                }
+                tr = document.createElement("tr");
+                tr.classList.add("employee-list-item-row");
+                if (employeeListDataKeys[i] === "website") {
+                    td = document.createElement("td");
+                    tr.classList.add("website");
+                    td.colSpan = "2";
+                    for (j = 0; j < 3; j += 1) {
+                        keyHelper = websiteKeys[j][0];
+                        if (itemData[keyHelper]) {
+                            td.innerHTML += '<a class="list-item-website" href="' + itemData[keyHelper] + '" target="_blank">' + websiteKeys[j][1] + '</a>';
+                            //                            td.innerHTML += '<a class="list-item-website" href="' + itemData[keyHelper] + '" target="_blank">' + websiteKeys[j][1] + '</a>';
+                        }
+                    }
+                    tr.appendChild(td);
+                    table.appendChild(tr);
+
+                    //                    tr.innerHTML += '<td><a href="' + dataHelper + '" target="_blank" class="list-item-website">' + employeeListItemTableLabels[i - 2] + '</a></td>';
+                    //                    tr.innerHTML += '<td><a href="' + dataHelper + '" target="_blank" class="list-item-website">' + employeeListItemTableLabels[i - 2] + '</a></td>';
+                } else if (employeeListDataKeys[i] === "departmentName") {
+                    tr.classList.add("departmentName");
+                    tr.innerHTML += '<td>' + employeeListItemTableLabels[i - 2] + '</td>';
+                    tr.innerHTML += '<td><a onclick="clickDepartmentListItem(' + itemData.departmentId + ')">' + dataHelper + '</a></td>';
+                } else {
+                    tr.classList.add(employeeListDataKeys[i]);
+                    tr.innerHTML += '<td>' + employeeListItemTableLabels[i - 2] + '</td>';
+                    tr.innerHTML += '<td>' + dataHelper + '</td>';
+
+                }
+                table.appendChild(tr);
+            }
+        } else if (i === 1) {
+            itemHelper.innerHTML += '<div class="employee-img-and-data-holder"><div class="employee-profile-picture-holder-no-image"><img class="employee-no-image"></div></div>';
+        }
+    }
+
+    return itemHelper;
+}
+
+function printEmployeeList(dataArray) {
+    "use strict";
+    var i,
+        employeeList = document.getElementById("employeeListContainer"),
+        div;
+
+    for (i = 0; i < dataArray.length; i += 1) {
+        employeeList.appendChild(printEmployeeListItem(dataArray[i]));
+    }
+}
+
+function addSupDepartmentListItem(name, departmentId) {
+    "use strict";
+    var li,
+        p,
+        superiorDepartmentListContainerUl = document.getElementById("superiorDepartmentListContainer").querySelector("ul");
+
+    li = document.createElement("li");
+    p = document.createElement("p");
+    p.classList.add("department");
+    p.onclick = function () {
+        clickDepartmentListItem(departmentId);
+    };
+    p.innerHTML = name;
+    li.appendChild(p);
+    superiorDepartmentListContainerUl.insertBefore(li, superiorDepartmentListContainerUl.firstChild);
+}
+
+function getSubDepartmentData() {
+    "use strict";
+    getSubDepartmentList(currentDepartmentId, function (aDepartmentId) {
+        var subDepartmentList = globalDepartmentList[aDepartmentId].data,
+            i,
+            li,
+            p,
+            subDepartmentListContainerUl = document.getElementById("subDepartmentListContainer").querySelector("ul"),
+            clickHandler = function (aDepartmentId) {
+                return function () {
+                    clickDepartmentListItem(aDepartmentId);
+                };
+            };
+
+        subDepartmentListContainerUl.parentElement.style.display = (subDepartmentList.length > 0) ? "block" : "none";
+
+
+        for (i = 0; i < subDepartmentList.length; i += 1) {
+            li = document.createElement("li");
+            p = document.createElement("p");
+            p.onclick = clickHandler(subDepartmentList[i].id);
+            p.innerHTML = subDepartmentList[i].name;
+            li.appendChild(p);
+            subDepartmentListContainerUl.appendChild(li);
+        }
+        searchEmployee(currentDepartmentId);
+        //        console.log("getSubDepartmentData() - searchEmployee(" + currentDepartmentId + ") - " + Date.now());
+    });
+}
+
+function getOwnerData(departmentId) {
+    "use strict";
+    var url = DEPARTMENT_ROOT_PATH + "departmentData?departmentId=" + departmentId;
+
+    getDataForDepartmentList(url, function (response, success) {
+        if (success) {
+            var respDepId = response.data[0].id;
+
+            if (respDepId === currentDepartmentId) {
+                document.getElementById("departmentName").innerHTML = response.data[0].name;
+            } else {
+                addSupDepartmentListItem(response.data[0].name, response.data[0].id);
+            }
+            if (respDepId !== rootOwnerId) {
+                getOwnerData(response.data[0].ownerId);
+                globalDepartmentList[response.data[0].id] = {
+                    ownerId: response.data[0].ownerId,
+                    name: response.data[0].name,
+                    departmentId: response.data[0].id,
+                    data: null
+                };
+            } else {
+                getSubDepartmentData();
+            }
+        }
+    });
+}
+
+function printSupAndSubDepartmentList(departmentId) {
+    "use strict";
+    var li,
+        p,
+        superiorDepartmentListContainerUl = document.getElementById("superiorDepartmentListContainer").querySelector("ul"),
+        subDepartmentListContainerUl = document.getElementById("subDepartmentListContainer").querySelector("ul");
+
+
+    superiorDepartmentListContainerUl.innerHTML = '';
+    subDepartmentListContainerUl.innerHTML = '';
+
+    superiorDepartmentListContainerUl.parentElement.style.display = (departmentId !== rootOwnerId) ? "block" : "none";
+    currentDepartmentId = departmentId;
+    if (!firstAutomatedRun) {
+        getOwnerData(departmentId);
+        firstAutomatedRun = false;
+    }
+
+}
+
+function clickDepartmentListItem(departmentId) {
+    "use strict";
+    allEmployeeDownloaded = false;
+    currentStartRowValue = 0;
+    currEmployeeSearchValue = "";
+    searchEmployeeFieldPreValue = "";
+    window.scrollTo(0, document.getElementById("departmentListContainer").offsetTop);
+    document.getElementById("unidebEmployeeSearchField").value = "";
+    showDepartmentDetailContainer(true);
+    printSupAndSubDepartmentList(departmentId);
+    document.getElementById("employeeListContainer").innerHTML = '';
+    closeDepartmentListContainer();
+}
+
+function clickDepartmentListItemExpandButton(departmentId) {
+    "use strict";
+
+    var listItem = document.getElementById("departmentListItem_" + departmentId);
+    if (listItem.classList.contains("open")) {
+        removeSubDepartmentList(departmentId);
+        listItem.classList.remove("open");
+    } else {
+        getSubDepartmentList(departmentId, function (aDepartmentId) {
+            printSubDepartmentList(aDepartmentId);
+            document.getElementById("departmentListItem_" + aDepartmentId).classList.add("open");
+        });
+    }
+}
+
+function showDepartmentDetailContainer(showParam) {
+    "use strict";
+    document.getElementById("departmentDetailContainer").style.display = (showParam) ? "block" : "none";
+}
+
+function showEmptyResultLabel(showParam) {
+    "use strict";
+    document.getElementById("employeeEmptyResultLabel").style.display = (showParam) ? "block" : "none";
+}
+
+function showErrorMessageLabel(showParam) {
+    "use strict";
+    document.getElementById("employeeErrorMessageLabel").style.display = (showParam) ? "block" : "none";
+}
+
+function showEmployeeSearchLoadingHolder(showParam) {
+    "use strict";
+    document.getElementById("employeeSearchLoadingHolder").style.display = (showParam) ? "block" : "none";
+}
+
+function closeDepartmentListContainer() {
+    "use strict";
+    var container = document.getElementById("departmentListContainer");
+    if (!container.classList.contains("list-close")) {
+        container.classList.add("list-close");
+        container.style.height = "40px";
+    }
+}
+
+/*
+ function removeModalImage(img) {
+ "use strict";
+ img.parentElement.removeChild(img);
+ }
+
+ function onclickProfilePicture(img) {
+ "use strict";
+
+ var container = document.createElement("div"),
+ modalImg = document.createElement("img"),
+ parent = img.parentElement,
+ width,
+ height;
+
+ modalImg.classList.add("employee-profile-picture-modal");
+
+ container.style.position = "absolute";
+ container.style.top = 0;
+ container.style.left = 0;
+ container.style.maxWidth = "100%";
+ container.style.zIndex = "10";
+
+ container.setAttribute("onclick", "removeModalImage(this)");
+
+ container.appendChild(modalImg);
+ parent.appendChild(container);
+
+ width = ((parent.parentElement.offsetWidth > 400) ? 400 : parent.parentElement.offsetWidth);
+ height = (img.height / img.width) * width;
+
+ container.style.width = width + "px";
+ container.style.height = height + "px";
+
+ container.style.backgroundColor = "rgba(0,0,0,0.8)";
+
+ modalImg.src = (img.src.slice(0, img.src.length - 3) + width);
+ }*/
+
+function openDepartmentListContainer() {
+    "use strict";
+    var container = document.getElementById("departmentListContainer");
+    if (container.classList.contains("list-close")) {
+        container.classList.remove("list-close");
+        container.style.height = (document.getElementById("rootDepartmentListItem").offsetHeight + 40) + "px";
+    } else {
+        closeDepartmentListContainer();
+    }
+}
+
+function searchEmployee(departmentId) {
+    "use strict";
+
+    if (!employeeSearchInProgress) {
+
+        //console.log("searchEmployee(" + departmentId +  ") - " + Date.now());
+
+        var url = DEPARTMENT_ROOT_PATH + "searchDepartmentEmployee?startRow=" + currentStartRowValue + "&endRow=" + (currentStartRowValue + 14);
+
+        if (departmentId === null) {
+            url += "&name=" + currEmployeeSearchValue + "&departmentId=" + rootOwnerId;
+        } else {
+            url += "&departmentId=" + globalDepartmentList[departmentId].departmentId;
+        }
+        showEmployeeSearchLoadingHolder(true);
+        showEmptyResultLabel(false);
+        showErrorMessageLabel(false);
+        employeeSearchInProgress = true;
+        getDataForDepartmentList(url, function (response, success) {
+            showEmployeeSearchLoadingHolder(false);
+            employeeSearchInProgress = false;
+            if (success) {
+                if (response.data.length < 15) {
+                    allEmployeeDownloaded = true;
+                } else {
+                    currentStartRowValue += 15;
+                }
+                if (response.data.length > 0) {
+                    printEmployeeList(response.data);
+                }
+                if (response.data.length === 0 && currentStartRowValue === 0) {
+                    showEmptyResultLabel(true);
+                }
+            } else {
+                showErrorMessageLabel(true);
+            }
+
+        });
+    }
+}
+
+function checkEmployeeSearchValue(value) {
+    "use strict";
+    showDepartmentDetailContainer(false);
+    document.getElementById("employeeListContainer").innerHTML = '';
+
+    if (value === "") {
+        showEmployeeSearchLoadingHolder(false);
+    } else if (value !== searchEmployeeFieldPreValue) {
+        currEmployeeSearchValue = value;
+        allEmployeeDownloaded = false;
+        closeDepartmentListContainer();
+        currentStartRowValue = 0;
+        searchEmployee(null);
+    }
+    searchEmployeeFieldPreValue = value;
+}
+
+function onclickEmployeeSearchButton() {
+    "use strict";
+    checkEmployeeSearchValue(document.getElementById("unidebEmployeeSearchField").value);
+}
+
+function onKeyPressEmployeeSearchField(event, value) {
+    "use strict";
+    var keyCode = event.which || event.keyCode;
+
+    if (keyCode === 13) {
+        checkEmployeeSearchValue(value);
+    }
+}
+
+function onScrollBody() {
+    "use strict";
+    var departmentListHolder = document.getElementsByClassName("department-list-holder")[0],
+        scrollLimit = ((departmentListHolder.offsetTop + departmentListHolder.clientHeight - window.innerHeight));
+
+    //console.log("depListHolder: " + ((departmentListHolder.offsetTop + departmentListHolder.clientHeight - window.innerHeight)));
+    //console.log("scrollLimit: " + scrollLimit);
+    //console.log("window.scrollY: " + window.scrollY);
+
+    if (!allEmployeeDownloaded && !employeeSearchInProgress && (currentStartRowValue > 0) && (scrollLimit <= window.scrollY)) {
+        if (currEmployeeSearchValue !== "") {
+            searchEmployee(null);
+            //console.log("onScrollBody() - searchEmployee(null) - " + Date.now());
+        } else {
+            searchEmployee(currentDepartmentId);
+            //console.log("onScrollBody() - searchEmployee(" + currentDepartmentId + ") - " + Date.now());
+        }
+    }
+}
+
+function onclickRetryDownloadButton() {
+    "use strict";
+    if (currEmployeeSearchValue !== "") {
+        searchEmployee(null);
+    } else {
+        searchEmployee(currentDepartmentId);
+    }
+}
+
+function initDepartmentList(departmentId, extCode, depName) {
+    "use strict";
+
+    var employeeListItemTableLabelsHu = ["Szervezeti egység",
+            "Központi telefonszám, mellék",
+            "Közvetlen telefonszám",
+            "E-mail",
+            "Cím",
+            "Épület, emelet, szobaszám",
+            "Fax, mellék",
+            "Weboldal"],
+        employeeListItemTableLabelsEn = ["Department",
+            "Phone number, extension",
+            "Direct phone number",
+            "E-mail",
+            "Address",
+            "Building, floor, room number",
+            "Fax number, extension",
+            "Website"];
+
+    var isDemoServer = Drupal.settings.unideb.unideb_base_rest_url;
+    if (isDemoServer) {
+        DEPARTMENT_ROOT_PATH = DEPARTMENT_ROOT_PATH.replace("mad-hatter", "demo.mad-hatter");
+        employee_img_src_path = employee_img_src_path.replace("mad-hatter", "demo.mad-hatter");
+    }
+
+    employeeListItemTableLabels = (Drupal.settings.pathPrefix.indexOf('en') === -1) ? employeeListItemTableLabelsHu : employeeListItemTableLabelsEn;
+
+    rootOwnerId = departmentId;
+    getDataState = "IDLE";
+    currentStartRowValue = 0;
+    currEmployeeSearchValue = "";
+    searchEmployeeFieldPreValue = "";
+    allEmployeeDownloaded = true;
+    employeeSearchInProgress = false;
+
+    window.addEventListener("scroll", onScrollBody);
+
+    globalDepartmentList[departmentId] = {
+        ownerId: null,
+        name: depName,
+        departmentId: departmentId,
+        data: null
+    };
+
+    getSubDepartmentList(departmentId, function (departmentId) {
+        printSubDepartmentList(departmentId);
+    });
+
+}
+;
+var captionText = '';
+jQuery(document).ready(function () {
+    var modalString = ' <div id="imageModal" class="modal" role="dialog"><div class="modal-dialog"><div id="unideb-loading"></div><img class="modal-content" id="openedImage"><div id="caption"></div></div></div>';
+    var modalDiv = document.createElement("div");
+    modalDiv.innerHTML = modalString;
+
+    var element = document.getElementById("content");
+
+    if (element != null) {
+        element.appendChild(modalDiv);
+
+
+        var modal = document.getElementById('imageModal');
+        var img;
+
+        jQuery(document).ready(function () {
+
+            jQuery("#content>.node img").each(function (index, element) {
+                if (jQuery(this).attr('id') != 'imageGaleryCoverImg' && jQuery(this).attr('class') != 'employee-no-image' && !jQuery(this).hasClass( "no-lightbox" ) ) {
+                    img = element;
+                    var modalImg = document.getElementById("openedImage");
+                    captionText = document.getElementById("caption");
+                    var loadingIndicator = document.getElementById("unideb-loading");
+                    var imageURL = '';
+
+                    img.onclick = function () {
+                        modal.style.display = "block";
+                        loadingIndicator.style.display = "block";
+                        modalImg.style.display = "none";
+
+                        imageURL = this.src;
+                        //imageURL = "";
+
+                        var downloadingImage = new Image();
+                        downloadingImage.onload = function () {
+                            modalImg.src = imageURL;
+                            loadingIndicator.style.display = "none";
+                            modalImg.style.display = "block";
+                            captionText.innerHTML = '<span class="closeButton">&times;</span>';
+                        };
+                        if (imageURL.split("?").length > 0) {
+                            imageURL = imageURL.split("?")[0];
+                        }
+                        downloadingImage.src = imageURL;
+                    }
+
+                    captionText.onclick = function () {
+                        resetModal();
+                    }
+                }
+            });
+
+        });
+
+        modal.onclick = function () {
+            resetModal();
+        };
+
+        function resetModal() {
+            modal.style.display = "none";
+            captionText.innerHTML = '';
+        }
+    }
+});
+;

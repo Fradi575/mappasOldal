@@ -1,0 +1,53 @@
+
+var cname = "gdpr-law-accepted";
+var gdpr_block = "";
+
+jQuery(document).ready(function () {
+    unidebCheckGDPRCookie();
+});
+
+function agreeButtonListener() {
+    var aggreeButton = document.querySelector("button[name=agree-button]");
+    if(aggreeButton) {
+        aggreeButton.addEventListener("click", function () {
+            var clientHeight = gdpr_block.height();
+            clientHeight = (clientHeight * -1) - 5;
+            gdpr_block.animate({'bottom': clientHeight + 'px'}, 1000);
+            setTimeout(
+                function () {
+                    gdpr_block.hide();
+                }, 1000);
+            unidebSetGDPRCookie(cname, 100);
+        });
+    }
+}
+
+function unidebCheckGDPRCookie() {
+    gdpr_block = jQuery("#unideb-gdpr-block");
+    if (unidebGetGDPRCookie(cname) == "") {
+    gdpr_block.css("display","block");
+        agreeButtonListener();
+    }
+}
+function unidebGetGDPRCookie(cname) {
+    var name = cname + "=";
+    var ca = document.cookie.split(';');
+    for (var i = 0; i < ca.length; i++) {
+        var c = ca[i];
+        while (c.charAt(0) == ' ') {
+            c = c.substring(1);
+        }
+        if (c.indexOf(name) == 0) {
+            return c.substring(name.length, c.length);
+        }
+    }
+    return "";
+}
+
+function unidebSetGDPRCookie(cvalue, exdays) {
+    var d = new Date();
+    d.setTime(d.getTime() + (exdays * 24 * 60 * 60 * 1000));
+    var expires = "expires=" + d.toUTCString();
+    document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/";
+}
+;
